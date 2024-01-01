@@ -4,7 +4,7 @@ import argparse
 import string
 import subprocess
 import time
-from typing import Literal
+from typing import Callable, Literal
 
 # pylint: disable=missing-function-docstring, invalid-name
 
@@ -60,11 +60,11 @@ def glider(up: bool, left: bool) -> Board:
 
 def add(board: Board, other: Board, operator=bool.__or__) -> Board:
     new = []
-    for y in range(len(board)):
+    for y, row in enumerate(board):
         new_row = empty_row()
         other_row = other[y] if y < len(other) else empty_row()
-        for x in range(len(board)):
-            new_row.append(operator(board[y][x], ix(other_row, x)))
+        for x, cell in enumerate(row):
+            new_row.append(operator(cell, ix(other_row, x)))
         new.append(new_row)
     return new
 
@@ -143,15 +143,43 @@ def show(board: Board, alphabet: tuple[str, str] = (LIVE_STR, DEAD_STR), sep="")
 def parse(lines: list[str], live: str = "#@&" + string.ascii_uppercase) -> Board:
     output: Board = []
     for row in lines:
+        row = row.strip()
+        if len(row) == 0:
+            continue
         output.append([LIVE if cell in live else DEAD for cell in row])
-    assert all(len(row) > 0 for row in output), "no empty rows"
+    assert len(output), f"empty board parsed:\n{lines}"
+    assert all(len(row) > 0 for row in output), f"empty rows found:\n{lines}"
     return output
+
+
+def pick_updater(source: str, surface: Surface) -> Callable[[Board], Board]:
+    def command(board_str: str) -> list[str]:
+        if source.endswith(".py"):
+            return ["python3", source, board_str]
+        if source.endswith(".bin"):
+            return [source, board_str]
+        return ["echo", "Unknown source"]
+
+    def external(board: Board) -> Board:
+        #if surface != 'rectangle': logger.warning("Warning: ignoring surface argument for source", source)
+        encoded_board = show(board, alphabet=("#", "."))
+        output = subprocess.check_output(command(encoded_board)).decode("utf-8")
+        #logger.info(output)
+        return parse(output.split("\n"))
+
+    def default(board: Board) -> Board:
+        return update(board, surface=surface)
+
+    if source.startswith("./variants"):
+        print("Using external script", source)
+        return external
+    return default
 
 
 def cli_loop(
     board: Board,
-    name: str | None=None,
-    source: str="unknown",
+    name: str | None = None,
+    source: str = "unknown",
     max_iterations: int | float = float("inf"),
     delay: float = 0.1,
     surface: Surface = surfaces[0],
@@ -168,10 +196,12 @@ def cli_loop(
     if max_iterations == 0:
         print(show(board, alphabet))
 
+    update_function = pick_updater(source, surface)
+
     iterations = 0
     while iterations < max_iterations:
         # Update
-        board = update(board, surface=surface)
+        board = update_function(board)
 
         # Display
         if color:
@@ -202,7 +232,11 @@ def main() -> None:
         choices=surfaces,
         help="The shape of the universe.",
     )
-    parser.add_argument("--source", choices=["this", "neopixel", "golf.py"], default="gameoflife written in python")
+    parser.add_argument(
+        "--source",
+        choices=["this", "neopixel", "./variants/golf.py"],
+        default="gameoflife written in python",
+    )
     parser.add_argument("--name", default=None)
     parser.add_argument("--pretty", "-p", action="store_true")
     parser.add_argument("--narrow", "-n", action="store_true")
@@ -211,13 +245,15 @@ def main() -> None:
         "--size",
         type=int,
         default=None,
-        help="If a file is not given, how big should the board be? The size of the terminal window may be used.",
+        help="If a file is not given, how big should the board be? "
+        "The size of the terminal window may be used.",
     )
     board_input = parser.add_mutually_exclusive_group(required=True)
     board_input.add_argument(
         "--file",
         "-f",
-        help=f"Dead cells and live cells are represented by the characters {DEAD_STR} and {LIVE_STR}",
+        help="Dead cells and live cells are represented by "
+        f"the characters {DEAD_STR} and {LIVE_STR}",
     )
     board_input.add_argument("BOARD", nargs="?")
     board_input.add_argument("--empty-board", action="store_true")
@@ -229,8 +265,8 @@ def main() -> None:
     if not size:
         # Use terminal width to find size
         try:
-            width = int(subprocess.check_output(['tput','cols']))
-            height = int(subprocess.check_output(['tput','lines']))
+            width = int(subprocess.check_output(["tput", "cols"]))
+            height = int(subprocess.check_output(["tput", "lines"]))
             size = min(width, height)
             # For additional output
             size -= 3
