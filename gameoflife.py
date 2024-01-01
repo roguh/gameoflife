@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The Game of Life."""
 import argparse
+import string
 import time
 from typing import Literal
 
@@ -138,23 +139,23 @@ def show(board: Board, alphabet: tuple[str, str] = (LIVE_STR, DEAD_STR), sep="")
     return "\n".join(sep.join(live if cell else dead for cell in row) for row in board)
 
 
-def parse(lines: list[str], live: str = "#") -> Board:
+def parse(lines: list[str], live: str = "#@&" + string.ascii_uppercase) -> Board:
     output: Board = []
     for row in lines:
-        output.append([LIVE if cell == live else DEAD for cell in row])
+        output.append([LIVE if cell in live else DEAD for cell in row])
     assert all(len(row) > 0 for row in output), "no empty rows"
     return output
 
 
 def cli_loop(
     board: Board,
+    source: str,
     max_iterations: int | float = float("inf"),
     delay: float = 0.1,
     surface: Surface = surfaces[0],
     pretty: bool = False,
     narrow: bool = False,
     color: bool = False,
-    source: str = "reference.py",
 ) -> None:
     alphabet = (LIVE_STR, DEAD_STR)
     if pretty:
@@ -201,7 +202,7 @@ def main() -> None:
         choices=surfaces,
         help="The shape of the universe.",
     )
-    parser.add_argument("--source", default="reference.py")
+    parser.add_argument("--source", default="builtin")
     parser.add_argument("--pretty", "-p", action="store_true")
     parser.add_argument("--narrow", "-n", action="store_true")
     parser.add_argument("--color", "-c", action="store_true")
@@ -224,12 +225,12 @@ def main() -> None:
     args = parser.parse_args()
 
     size = args.size
-    init_board = empty(size, size)
-    if args.file:
+    if args.empty_board:
+        init_board = empty(size, size)
+    elif args.file:
         with open(args.file, encoding="utf-8") as boardfile:
             init_board = parse(boardfile.readlines())
     else:
-        size = args.glider_board or size
         top = 2
         offset = 8
         init_board = empty(size, size)
@@ -244,6 +245,7 @@ def main() -> None:
         cli_loop(
             board=init_board,
             max_iterations=args.iterations,
+            source=args.source,
             delay=args.delay,
             surface=args.surface,
             pretty=args.pretty,
