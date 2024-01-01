@@ -2,6 +2,7 @@
 """The Game of Life."""
 import argparse
 import string
+import subprocess
 import time
 from typing import Literal
 
@@ -149,7 +150,8 @@ def parse(lines: list[str], live: str = "#@&" + string.ascii_uppercase) -> Board
 
 def cli_loop(
     board: Board,
-    source: str,
+    name: str | None=None,
+    source: str="unknown",
     max_iterations: int | float = float("inf"),
     delay: float = 0.1,
     surface: Surface = surfaces[0],
@@ -179,10 +181,8 @@ def cli_loop(
             print(A_RESET_COLOR)
         if all(not cell for row in board for cell in row):
             print("empty board")
-        print()
-        print()
         print("Game of Life", iterations)
-        print("Source:", source)
+        print(name, "source:", source)
         iterations += 1
         if iterations < max_iterations:
             time.sleep(delay)
@@ -194,7 +194,7 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("--iterations", "-i", type=int, default=float("inf"))
-    parser.add_argument("--delay", "-d", type=float, default=0.05)
+    parser.add_argument("--delay", "-d", type=float, default=0.03)
     parser.add_argument(
         "--surface",
         "-s",
@@ -202,14 +202,15 @@ def main() -> None:
         choices=surfaces,
         help="The shape of the universe.",
     )
-    parser.add_argument("--source", default="builtin")
+    parser.add_argument("--source", default="gameoflife written in python")
+    parser.add_argument("--name", default=None)
     parser.add_argument("--pretty", "-p", action="store_true")
     parser.add_argument("--narrow", "-n", action="store_true")
     parser.add_argument("--color", "-c", action="store_true")
     parser.add_argument(
         "--size",
         type=int,
-        default=32,
+        default=None,
         help="If a file is not given, how big should the board be? The size of the terminal window may be used.",
     )
     board_input = parser.add_mutually_exclusive_group(required=True)
@@ -225,6 +226,17 @@ def main() -> None:
     args = parser.parse_args()
 
     size = args.size
+    if not size:
+        # Use terminal width to find size
+        try:
+            width = int(subprocess.check_output(['tput','cols']))
+            height = int(subprocess.check_output(['tput','lines']))
+            size = min(width, height)
+            # For additional output
+            size -= 3
+        except:
+            size = 32
+            print("Unable to find terminal size with Linux tput")
     if args.empty_board:
         init_board = empty(size, size)
     elif args.file:

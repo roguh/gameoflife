@@ -1,0 +1,5 @@
+#!/bin/sh
+# Run a cool default
+exec "$(dirname "$0")"/gameoflife.py \
+  --pretty --color --delay 0.03 --glider \
+  --name 'featherweight gliders (ants)'
