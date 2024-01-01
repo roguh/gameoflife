@@ -7,7 +7,7 @@ import string
 import subprocess
 import sys
 import time
-from typing import Callable, Literal, TypedDict
+from typing import Callable, Literal, Optional, TypedDict
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, invalid-name
 
@@ -186,14 +186,14 @@ def pick_updater(source: str, surface: Surface) -> Callable[[Board], Board]:
 
 class Display(abc.ABC):
     @abc.abstractmethod
-    def display(self, board, iteration: int | float, args: OutputArgs) -> None:
+    def display(self, board, iteration: float, args: OutputArgs) -> None:
         pass
 
 
 class NeoPixel(Display):
     count = 64
 
-    def display(self, board, iteration: int | float, args: OutputArgs) -> None:
+    def display(self, board, iteration: float, args: OutputArgs) -> None:
         import board
         import neopixel
 
@@ -220,7 +220,7 @@ class CLI(Display):
     ]
     colors_dict = dict(colors)
 
-    def display(self, board, iteration: int | float, args: OutputArgs) -> None:
+    def display(self, board, iteration: float, args: OutputArgs) -> None:
         alphabet = (LIVE_STR, DEAD_STR)
         if args.get("pretty"):
             alphabet = (LIVE_STR_PRETTY, DEAD_STR_PRETTY)
@@ -263,9 +263,9 @@ class CLI(Display):
 
 def loop(
     board: Board,
-    max_iterations: int | float = float("inf"),
+    max_iterations: float = float("inf"),
     surface: Surface = surfaces[0],
-    args: OutputArgs | None = None,
+    args: Optional[OutputArgs] = None,
 ) -> None:
     if not args:
         args = {}
