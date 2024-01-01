@@ -400,6 +400,8 @@ def main() -> None:
             args=output_args,
         )
     except (EOFError, KeyboardInterrupt):
+        if args.color:
+            print(end=CLI.reset_color)
         sys.exit(1)
 
 
