@@ -202,7 +202,7 @@ def main() -> None:
         choices=surfaces,
         help="The shape of the universe.",
     )
-    parser.add_argument("--source", default="gameoflife written in python")
+    parser.add_argument("--source", choices=["this", "neopixel", "golf.py"], default="gameoflife written in python")
     parser.add_argument("--name", default=None)
     parser.add_argument("--pretty", "-p", action="store_true")
     parser.add_argument("--narrow", "-n", action="store_true")
