@@ -13,9 +13,6 @@ Row = list[bool]
 Board = list[list[bool]]
 Surface = Literal["sphere", "rectangle", "infinite", "torus", "?"]
 
-Output = Literal["cli", "neopixel"]
-OUTPUTS: list[Output] = ["cli", "neopixel"]
-
 LIVE = True
 DEAD = False
 L = LIVE
@@ -228,15 +225,6 @@ def loop(
     update_function = pick_updater(args.get("source", "unknown"), surface)
 
     display = cli_display
-    if args.get("output") == "neopixel":
-        # We can ignore this because this import might cause a crash on
-        # platforms that do not support neopixel
-        # pylint: disable=import-outside-toplevel
-        from lib.gpio import neopixel
-
-        def display(board: Board, iteration: int, args: OutputArgs):
-            return neopixel.display(board, iteration, neopixel.OutputArgs(args))
-
     while iteration < max_iterations:
         # Update
         board = update_function(board)
@@ -244,6 +232,38 @@ def loop(
         iteration += 1
         display(board, iteration, args)
 
+def make_init_board(args) -> Board:
+    # Use terminal width to find size
+    try:
+        width = args.width or int(subprocess.check_output(["tput", "cols"]))
+        height = args.height or int(subprocess.check_output(["tput", "lines"]))
+        height -= 3
+        if not args.narrow:
+            width //= 2
+    except:  # pylint: disable=bare-except
+        width, height = 32, 32
+        print("Unable to find terminal size with Linux tput")
+    if args.empty_board:
+        return empty(width, height)
+    if args.file:
+        with open(args.file, encoding="utf-8") as boardfile:
+            return parse(boardfile.readlines())
+    if args.glider_board:
+        if width > height:
+            width = height * (width // height)
+        else:
+            height = width * (height // width)
+    top = 2
+    offset = 8
+    board = empty(width, height)
+    direction = True
+    for y in range(top, height, offset):
+        board = add(
+            board,
+            shift(glider(up=direction, left=direction), x=width // 2, y=y),
+        )
+        direction = not direction
+    return board
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -260,20 +280,26 @@ def main() -> None:
     )
     parser.add_argument(
         "--source",
-        choices=["this", "neopixel", "./variants/golf.py"],
+        choices=["this", "./variants/golf.py"],
         default="gameoflife written in python",
     )
-    parser.add_argument("--output", choices=OUTPUTS, default="cli")
     parser.add_argument("--name", default="")
     parser.add_argument("--pretty", "-p", action="store_true")
     parser.add_argument("--narrow", "-n", action="store_true")
     parser.add_argument("--color", "-c", action="store_true")
     parser.add_argument(
-        "--size",
+        "--width", "-w",
         type=int,
         default=None,
-        help="If a file is not given, how big should the board be? "
-        "The size of the terminal window may be used.",
+        help="Minimum size of the board. "
+        "The size of the terminal window may be used if this option not given.",
+    )
+    parser.add_argument(
+        "--height", "-l",
+        type=int,
+        default=None,
+        help="Minimum size of the board. "
+        "The size of the terminal window may be used if this option not given.",
     )
     board_input = parser.add_mutually_exclusive_group(required=True)
     board_input.add_argument(
@@ -288,41 +314,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    output: Output = args.output
-    assert output in OUTPUTS, f"unknown output type {output}"
-
-    size = args.size
-    if not size:
-        if output == "neopixel":
-            print("--size is required for neopixel output")
-            return
-
-        # Use terminal width to find size
-        try:
-            width = int(subprocess.check_output(["tput", "cols"]))
-            height = int(subprocess.check_output(["tput", "lines"]))
-            size = min(width, height)
-            # For additional output
-            size -= 3
-        except:  # pylint: disable=bare-except
-            size = 32
-            print("Unable to find terminal size with Linux tput")
-    if args.empty_board:
-        init_board = empty(size, size)
-    elif args.file:
-        with open(args.file, encoding="utf-8") as boardfile:
-            init_board = parse(boardfile.readlines())
-    else:
-        top = 2
-        offset = 8
-        init_board = empty(size, size)
-        direction = True
-        for y in range(top, size, offset):
-            init_board = add(
-                init_board,
-                shift(glider(up=direction, left=direction), x=size // 2, y=y),
-            )
-            direction = not direction
+    init_board = make_init_board(args)
 
     output_args: OutputArgs = {
         "name": args.name,
