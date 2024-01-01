@@ -4,14 +4,17 @@ import argparse
 import string
 import subprocess
 import time
-from typing import Callable, Literal
+from typing import Callable, Literal, TypedDict
 
-# pylint: disable=missing-function-docstring, invalid-name
+# pylint: disable=missing-class-docstring, missing-function-docstring, invalid-name
 
 Cell = bool
 Row = list[bool]
 Board = list[list[bool]]
 Surface = Literal["sphere", "rectangle", "infinite", "torus", "?"]
+
+Output = Literal["cli", "neopixel"]
+OUTPUTS: list[Output] = ["cli", "neopixel"]
 
 LIVE = True
 DEAD = False
@@ -22,6 +25,15 @@ LIVE_STR = "# "
 DEAD_STR = "  "
 LIVE_STR_PRETTY = "█▒"
 DEAD_STR_PRETTY = "  "
+
+
+class OutputArgs(TypedDict, total=False):
+    source: str
+    name: str
+    delay: float
+    pretty: bool
+    narrow: bool
+    color: tuple[int, int, int]
 
 
 def empty_row() -> Row:
@@ -147,7 +159,7 @@ def parse(lines: list[str], live: str = "#@&" + string.ascii_uppercase) -> Board
         if len(row) == 0:
             continue
         output.append([LIVE if cell in live else DEAD for cell in row])
-    assert len(output), f"empty board parsed:\n{lines}"
+    assert len(output) > 0, f"empty board parsed:\n{lines}"
     assert all(len(row) > 0 for row in output), f"empty rows found:\n{lines}"
     return output
 
@@ -161,10 +173,11 @@ def pick_updater(source: str, surface: Surface) -> Callable[[Board], Board]:
         return ["echo", "Unknown source"]
 
     def external(board: Board) -> Board:
-        #if surface != 'rectangle': logger.warning("Warning: ignoring surface argument for source", source)
+        # if surface != 'rectangle':
+        # logger.warning("Warning: ignoring surface argument for source", source)
         encoded_board = show(board, alphabet=("#", "."))
         output = subprocess.check_output(command(encoded_board)).decode("utf-8")
-        #logger.info(output)
+        # logger.info(output)
         return parse(output.split("\n"))
 
     def default(board: Board) -> Board:
@@ -176,47 +189,60 @@ def pick_updater(source: str, surface: Surface) -> Callable[[Board], Board]:
     return default
 
 
-def cli_loop(
-    board: Board,
-    name: str | None = None,
-    source: str = "unknown",
-    max_iterations: int | float = float("inf"),
-    delay: float = 0.1,
-    surface: Surface = surfaces[0],
-    pretty: bool = False,
-    narrow: bool = False,
-    color: bool = False,
-) -> None:
+def cli_display(board, iteration: int | float, args: OutputArgs) -> None:
     alphabet = (LIVE_STR, DEAD_STR)
-    if pretty:
+    if args.get("pretty"):
         alphabet = (LIVE_STR_PRETTY, DEAD_STR_PRETTY)
-    if narrow:
+    if args.get("narrow"):
         alphabet = (alphabet[0][0], alphabet[1][0])
 
+    # Display
+    if args.get("color"):
+        print(A_RED_BOLD)
+    print(show(board, alphabet))
+    if args.get("color"):
+        print(A_RESET_COLOR)
+    if all(not cell for row in board for cell in row):
+        print("empty board")
+    print("Game of Life", iteration)
+    print(args.get("name", ""), "source:", args.get("source", "unknown"))
+
+    if iteration > 1:
+        time.sleep(args.get("delay", 1.0))
+        print(A_CLEAR, end=A_TOP)
+
+
+def loop(
+    board: Board,
+    max_iterations: int | float = float("inf"),
+    surface: Surface = surfaces[0],
+    args: OutputArgs | None = None,
+) -> None:
+    if not args:
+        args = {}
+
+    iteration = 0
     if max_iterations == 0:
-        print(show(board, alphabet))
+        cli_display(show(board), iteration, args)
 
-    update_function = pick_updater(source, surface)
+    update_function = pick_updater(args.get("source", "unknown"), surface)
 
-    iterations = 0
-    while iterations < max_iterations:
+    display = cli_display
+    if args.get("output") == "neopixel":
+        # We can ignore this because this import might cause a crash on
+        # platforms that do not support neopixel
+        # pylint: disable=import-outside-toplevel
+        from lib.gpio import neopixel
+
+        def display(board: Board, iteration: int, args: OutputArgs):
+            return neopixel.display(board, iteration, neopixel.OutputArgs(args))
+
+    while iteration < max_iterations:
         # Update
         board = update_function(board)
 
-        # Display
-        if color:
-            print(A_RED_BOLD)
-        print(show(board, alphabet))
-        if color:
-            print(A_RESET_COLOR)
-        if all(not cell for row in board for cell in row):
-            print("empty board")
-        print("Game of Life", iterations)
-        print(name, "source:", source)
-        iterations += 1
-        if iterations < max_iterations:
-            time.sleep(delay)
-            print(A_CLEAR, end=A_TOP)
+        iteration += 1
+        display(board, iteration, args)
 
 
 def main() -> None:
@@ -237,7 +263,8 @@ def main() -> None:
         choices=["this", "neopixel", "./variants/golf.py"],
         default="gameoflife written in python",
     )
-    parser.add_argument("--name", default=None)
+    parser.add_argument("--output", choices=OUTPUTS, default="cli")
+    parser.add_argument("--name", default="")
     parser.add_argument("--pretty", "-p", action="store_true")
     parser.add_argument("--narrow", "-n", action="store_true")
     parser.add_argument("--color", "-c", action="store_true")
@@ -261,8 +288,15 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    output: Output = args.output
+    assert output in OUTPUTS, f"unknown output type {output}"
+
     size = args.size
     if not size:
+        if output == "neopixel":
+            print("--size is required for neopixel output")
+            return
+
         # Use terminal width to find size
         try:
             width = int(subprocess.check_output(["tput", "cols"]))
@@ -270,7 +304,7 @@ def main() -> None:
             size = min(width, height)
             # For additional output
             size -= 3
-        except:
+        except:  # pylint: disable=bare-except
             size = 32
             print("Unable to find terminal size with Linux tput")
     if args.empty_board:
@@ -289,16 +323,21 @@ def main() -> None:
                 shift(glider(up=direction, left=direction), x=size // 2, y=y),
             )
             direction = not direction
+
+    output_args: OutputArgs = {
+        "name": args.name,
+        "source": args.source,
+        "delay": float(args.delay),
+        "pretty": bool(args.pretty),
+        "narrow": bool(args.narrow),
+        "color": (255, 0, 0) if args.color else (0, 0, 0),
+    }
     try:
-        cli_loop(
+        loop(
             board=init_board,
             max_iterations=args.iterations,
-            source=args.source,
-            delay=args.delay,
             surface=args.surface,
-            pretty=args.pretty,
-            narrow=args.narrow,
-            color=args.color,
+            args=output_args,
         )
     except (EOFError, KeyboardInterrupt):
         pass
