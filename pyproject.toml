@@ -4,6 +4,10 @@ version = "0.1"
 description = "Game of Life"
 
 [project.optional-dependencies]
+neopixel = [
+    "adafruit_circuitpython_neopixel",
+    "rpi_ws281x",
+]
 dev = [
     "black==23.10.0",
     "isort==5.12.0",

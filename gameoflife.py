@@ -185,22 +185,58 @@ def pick_updater(source: str, surface: Surface) -> Callable[[Board], Board]:
 
 class Display(abc.ABC):
     @abc.abstractmethod
-    def display(self, board, iteration: int, args: OutputArgs) -> None:
+    def display(self, board: Board, iteration: int, args: OutputArgs) -> None:
         pass
 
 
 class NeoPixel(Display):
-    count = 64
+    width = 16
+    height = 16
+    color = (255, 0, 0)
 
-    def display(self, board, iteration: int, args: OutputArgs) -> None:
+    def __init__(self) -> None:
+        # This 'board' refers to the circuitboard
         import board
         import neopixel
 
-        pin = board.GPIO18
+        # Raspberry Pi
+        # Choose an open pin connected to the Data In of the NeoPixel strip, i.e. board.D18
+        # NeoPixels must be connected to D10, D12, D18 or D21 to work.
+        # D19 - must enable SPI interface, but this allows using neopixels without root permissions
+        # D12 = GPIO18
+        # D19 - GPIO10, MOSI, part of userspace SPI driver
+        assert board.D10 == board.MOSI
+        pin = board.D10
         # pixel order?
-        pixels = neopixel.NeoPixel(pin, self.count, auto_write=False)
-        pixels[1] = pixels[0] = (255, 0, 0)
-        pixels.show()
+        self.pixels = neopixel.NeoPixel(pin, self.width * self.height, auto_write=False)
+        self.pixels.brightness = 0.5
+        print(f"Initialized {self.pixels.n} pixels, {self.width}x{self.height}")
+
+    def __del__(self) -> None:
+        self.pixels.deinit()
+        print("Turned off neopixel display")
+
+    def display(self, game_board: Board, iteration: int, args: OutputArgs) -> None:
+        delay = args.get("delay")
+
+        # Resize to fit the display
+        reduced_board = add(empty(self.width, self.height), game_board)
+        assert len(reduced_board) == self.height
+        assert len(reduced_board[0]) == self.width
+
+        i = 0
+        for row in reduced_board:
+            for cell in row:
+                if cell:
+                    self.pixels[i] = self.color
+                else:
+                    self.pixels[i] = (0, 0, 0)
+                i += 1
+        start_time = time.time()
+        self.pixels.show()
+        elapsed = time.time() - start_time
+        if iteration % 10 == 1:
+            print(f"Drew to screen in {elapsed} seconds")
 
 
 class CLI(Display):
@@ -220,7 +256,7 @@ class CLI(Display):
     ]
     colors_dict = dict(colors)
 
-    def display(self, board, iteration: int, args: OutputArgs) -> None:
+    def display(self, board: Board, iteration: int, args: OutputArgs) -> None:
         alphabet = (LIVE_STR, DEAD_STR)
         if args.get("pretty"):
             alphabet = (LIVE_STR_PRETTY, DEAD_STR_PRETTY)
@@ -273,9 +309,10 @@ def loop(
     if not args:
         args = {}
 
-    display = CLI().display
-    if args.get("display") == "neopixel":
+    if args.get("output") == "neopixel":
         display = NeoPixel().display
+    else:
+        display = CLI().display
 
     iteration = 0
     if max_iterations == 0:
