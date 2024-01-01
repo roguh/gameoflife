@@ -169,8 +169,7 @@ def pick_updater(source: str, surface: Surface) -> Callable[[Board], Board]:
         return ["echo", "Unknown source"]
 
     def external(board: Board) -> Board:
-        # if surface != 'rectangle':
-        # logger.warning("Warning: ignoring surface argument for source", source)
+        # ignore surface
         encoded_board = show(board, alphabet=("#", "."))
         output = subprocess.check_output(command(encoded_board)).decode("utf-8")
         return parse(output.split("\n"))
@@ -186,14 +185,14 @@ def pick_updater(source: str, surface: Surface) -> Callable[[Board], Board]:
 
 class Display(abc.ABC):
     @abc.abstractmethod
-    def display(self, board, iteration: float, args: OutputArgs) -> None:
+    def display(self, board, iteration: int, args: OutputArgs) -> None:
         pass
 
 
 class NeoPixel(Display):
     count = 64
 
-    def display(self, board, iteration: float, args: OutputArgs) -> None:
+    def display(self, board, iteration: int, args: OutputArgs) -> None:
         import board
         import neopixel
 
@@ -206,8 +205,9 @@ class NeoPixel(Display):
 
 class CLI(Display):
     current_color = 0
-    clear = "\033[2j"
-    top = "\033[h"
+    clear = "\033[2J"
+    to_top = "\033[H"
+    black_on_white = "\x1b[1;30;47m"
     reset_color = "\x1b[0m"
     colors: list[tuple[str, str]] = [
         ("red", "\x1b[0;31m"),
@@ -220,14 +220,20 @@ class CLI(Display):
     ]
     colors_dict = dict(colors)
 
-    def display(self, board, iteration: float, args: OutputArgs) -> None:
+    def display(self, board, iteration: int, args: OutputArgs) -> None:
         alphabet = (LIVE_STR, DEAD_STR)
         if args.get("pretty"):
             alphabet = (LIVE_STR_PRETTY, DEAD_STR_PRETTY)
         if args.get("narrow"):
             alphabet = (alphabet[0][0], alphabet[1][0])
-
+        
         setcolor = args.get("color")
+
+        if iteration > 1:
+            if setcolor:
+                print(CLI.reset_color, CLI.clear, end=CLI.to_top)
+            time.sleep(args.get("delay", 1.0))
+
         # Display
         if setcolor and setcolor in CLI.colors_dict:
             print(CLI.colors_dict.get(setcolor), end="")
@@ -248,17 +254,14 @@ class CLI(Display):
             print(out)
         else:
             print(show(board, alphabet))
-        if setcolor:
-            print(CLI.reset_color)
         if all(not cell for row in board for cell in row):
             print("empty board")
-        print("Game of Life", iteration)
-        print(args.get("name", ""), "source:", args.get("source", "unknown"))
 
         self.current_color += 1
-        if iteration > 1:
-            time.sleep(args.get("delay", 1.0))
-            print(CLI.clear, end=CLI.top)
+        
+        if setcolor:
+            print(CLI.reset_color + CLI.black_on_white, end="")
+        print(f"The Game of Life. {iteration} steps.", args.get("name", ""), args.get("source", ""))
 
 
 def loop(
@@ -276,7 +279,7 @@ def loop(
 
     iteration = 0
     if max_iterations == 0:
-        display(show(board), iteration, args)
+        display(board, iteration, args)
 
     update_function = pick_updater(args.get("source", "unknown"), surface)
 
@@ -293,7 +296,7 @@ def make_init_board(args) -> Board:
     try:
         width = args.width or int(subprocess.check_output(["tput", "cols"]))
         height = args.height or int(subprocess.check_output(["tput", "lines"]))
-        height -= 5
+        height -= 1
         if not args.narrow:
             width //= 2
     except:  # pylint: disable=bare-except
@@ -340,8 +343,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--source",
-        choices=["this", "./variants/golf.py"],
-        default="gameoflife written in python",
+        choices=["python", "./variants/golf.py"],
+        default="python",
     )
     parser.add_argument("--name", default="")
     parser.add_argument("--pretty", "-p", action="store_true")
