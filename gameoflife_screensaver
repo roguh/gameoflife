@@ -6,12 +6,12 @@ set -e
 if [ -z "$MAX_ITERATIONS" ]; then
     # Run a cool default
     "$(dirname "$0")"/gameoflife.py \
-      --pretty --color on --delay 0.07 --narrow --glider --iterations "$MAX_ITERATIONS" $@
+      --pretty --color on --delay 0.07 --glider --iterations "$MAX_ITERATIONS" $@
 fi
 
 for file in $(find "$FILES" -type f -iname *.txt); do
   "$(dirname "$0")"/gameoflife.py \
-    --pretty --color on --delay 0.07 --narrow \
+    --pretty --color on --delay 0.07 \
     --file "$file" --expand-to-size --iterations "$MAX_ITERATIONS" \
     $@
 done

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """The Game of Life."""
+import abc
 import argparse
 import os
 import string
@@ -33,6 +34,7 @@ class OutputArgs(TypedDict, total=False):
     pretty: bool
     narrow: bool
     color: str
+    output: Literal["cli", "neopixel"]
 
 
 def empty_row() -> Row:
@@ -171,7 +173,6 @@ def pick_updater(source: str, surface: Surface) -> Callable[[Board], Board]:
         # logger.warning("Warning: ignoring surface argument for source", source)
         encoded_board = show(board, alphabet=("#", "."))
         output = subprocess.check_output(command(encoded_board)).decode("utf-8")
-        # logger.info(output)
         return parse(output.split("\n"))
 
     def default(board: Board) -> Board:
@@ -183,60 +184,81 @@ def pick_updater(source: str, surface: Surface) -> Callable[[Board], Board]:
     return default
 
 
-A_CLEAR = "\033[2J"
-A_TOP = "\033[H"
-A_RED_BOLD = "\x1b[1;31m"
-A_RESET_COLOR = "\x1b[0m"
-COLORS = [
-    ("red", "\x1b[0;31m"),
-    ("magenta", "\x1b[0;34m"),
-    ("yellow", "\x1b[0;33m"),
-    ("green", "\x1b[0;32m"),
-    ("blue", "\x1b[0;35m"),
-    ("cyan", "\x1b[0;36m"),
-    ("white", "\x1b[0;37m"),
-]
-COLORS_DICT = dict(COLORS)
-current_color = 0
+class Display(abc.ABC):
+    @abc.abstractmethod
+    def display(self, board, iteration: int | float, args: OutputArgs) -> None:
+        pass
 
 
-def cli_display(board, iteration: int | float, args: OutputArgs) -> None:
-    global current_color
-    alphabet = (LIVE_STR, DEAD_STR)
-    if args.get("pretty"):
-        alphabet = (LIVE_STR_PRETTY, DEAD_STR_PRETTY)
-    if args.get("narrow"):
-        alphabet = (alphabet[0][0], alphabet[1][0])
+class NeoPixel(Display):
+    count = 64
 
-    setcolor = args.get("color")
-    # Display
-    if setcolor and setcolor in COLORS_DICT:
-        print(COLORS_DICT.get(setcolor), end="")
-    if setcolor == "dynamic":
-        live, dead = alphabet
-        out = "\n".join(
-            "".join(
-                COLORS[(current_color // 5 + x // 3 + y // 6) % len(COLORS)][1] + live
-                if cell
-                else dead
-                for x, cell in enumerate(row)
+    def display(self, board, iteration: int | float, args: OutputArgs) -> None:
+        import board
+        import neopixel
+
+        pin = board.GPIO18
+        # pixel order?
+        pixels = neopixel.NeoPixel(pin, self.count, auto_write=False)
+        pixels[1] = pixels[0] = (255, 0, 0)
+        pixels.show()
+
+
+class CLI(Display):
+    current_color = 0
+    clear = "\033[2j"
+    top = "\033[h"
+    reset_color = "\x1b[0m"
+    colors: list[tuple[str, str]] = [
+        ("red", "\x1b[0;31m"),
+        ("magenta", "\x1b[0;34m"),
+        ("yellow", "\x1b[0;33m"),
+        ("green", "\x1b[0;32m"),
+        ("blue", "\x1b[0;35m"),
+        ("cyan", "\x1b[0;36m"),
+        ("white", "\x1b[0;37m"),
+    ]
+    colors_dict = dict(colors)
+
+    def display(self, board, iteration: int | float, args: OutputArgs) -> None:
+        alphabet = (LIVE_STR, DEAD_STR)
+        if args.get("pretty"):
+            alphabet = (LIVE_STR_PRETTY, DEAD_STR_PRETTY)
+        if args.get("narrow"):
+            alphabet = (alphabet[0][0], alphabet[1][0])
+
+        setcolor = args.get("color")
+        # Display
+        if setcolor and setcolor in CLI.colors_dict:
+            print(CLI.colors_dict.get(setcolor), end="")
+        if setcolor == "dynamic":
+            live, dead = alphabet
+            out = "\n".join(
+                "".join(
+                    CLI.colors[
+                        (self.current_color // 5 + x // 3 + y // 6) % len(CLI.colors)
+                    ][1]
+                    + live
+                    if cell
+                    else dead
+                    for x, cell in enumerate(row)
+                )
+                for y, row in enumerate(board)
             )
-            for y, row in enumerate(board)
-        )
-        print(out)
-    else:
-        print(show(board, alphabet))
-    if setcolor:
-        print(A_RESET_COLOR)
-    if all(not cell for row in board for cell in row):
-        print("empty board")
-    print("Game of Life", iteration)
-    print(args.get("name", ""), "source:", args.get("source", "unknown"))
+            print(out)
+        else:
+            print(show(board, alphabet))
+        if setcolor:
+            print(CLI.reset_color)
+        if all(not cell for row in board for cell in row):
+            print("empty board")
+        print("Game of Life", iteration)
+        print(args.get("name", ""), "source:", args.get("source", "unknown"))
 
-    current_color += 1
-    if iteration > 1:
-        time.sleep(args.get("delay", 1.0))
-        print(A_CLEAR, end=A_TOP)
+        self.current_color += 1
+        if iteration > 1:
+            time.sleep(args.get("delay", 1.0))
+            print(CLI.clear, end=CLI.top)
 
 
 def loop(
@@ -248,13 +270,16 @@ def loop(
     if not args:
         args = {}
 
+    display = CLI().display
+    if args.get("display") == "neopixel":
+        display = NeoPixel().display
+
     iteration = 0
     if max_iterations == 0:
-        cli_display(show(board), iteration, args)
+        display(show(board), iteration, args)
 
     update_function = pick_updater(args.get("source", "unknown"), surface)
 
-    display = cli_display
     while iteration < max_iterations:
         # Update
         board = update_function(board)
@@ -321,9 +346,8 @@ def main() -> None:
     parser.add_argument("--name", default="")
     parser.add_argument("--pretty", "-p", action="store_true")
     parser.add_argument("--narrow", "-n", action="store_true")
-    parser.add_argument(
-        "--color", "-c", choices=["on", "off", "dynamic"] + list(COLORS_DICT.keys())
-    )
+    parser.add_argument("--color", "-c", default="off")
+    parser.add_argument("--output", "-o", choices=["neopixel", "cli"])
     parser.add_argument(
         "--width",
         "-w",
@@ -357,12 +381,13 @@ def main() -> None:
     init_board = make_init_board(args)
 
     output_args: OutputArgs = {
-        "name": os.path.basename(args.file) or ("gliders" if args.glider_board else None),
+        "name": "gliders" if args.glider_board else os.path.basename(args.file),
         "source": args.source,
         "delay": float(args.delay),
         "pretty": bool(args.pretty),
         "narrow": bool(args.narrow),
         "color": "dynamic" if args.color == "on" else args.color,
+        "output": args.output,
     }
     try:
         loop(
