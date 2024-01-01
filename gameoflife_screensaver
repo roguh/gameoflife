@@ -1,5 +1,5 @@
 #!/bin/sh
-FILES="${FILES:-"$(dirname "$0")"/samples}"
+FILES="${FILES:-samples}"
 MAX_ITERATIONS="${MAX_ITERATIONS:-infinity}"
 
 set -e
