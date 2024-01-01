@@ -1,5 +1,17 @@
 #!/bin/sh
-# Run a cool default
-exec "$(dirname "$0")"/gameoflife.py \
-  --pretty --color --delay 0.03 --glider --narrow \
-  --name 'featherweight gliders (ants)' $@
+FILES="${FILES:-"$(dirname "$0")"/samples}"
+MAX_ITERATIONS="${MAX_ITERATIONS:-infinity}"
+
+set -e
+if [ -z "$MAX_ITERATIONS" ]; then
+    # Run a cool default
+    "$(dirname "$0")"/gameoflife.py \
+      --pretty --color on --delay 0.07 --narrow --glider --iterations "$MAX_ITERATIONS" $@
+fi
+
+for file in $(find "$FILES" -type f -iname *.txt); do
+  "$(dirname "$0")"/gameoflife.py \
+    --pretty --color on --delay 0.07 --narrow \
+    --file "$file" --expand-to-size --iterations "$MAX_ITERATIONS" \
+    $@
+done

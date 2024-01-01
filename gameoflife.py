@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """The Game of Life."""
 import argparse
+import os
 import string
 import subprocess
+import sys
 import time
 from typing import Callable, Literal, TypedDict
 
@@ -30,7 +32,7 @@ class OutputArgs(TypedDict, total=False):
     delay: float
     pretty: bool
     narrow: bool
-    color: tuple[int, int, int]
+    color: str
 
 
 def empty_row() -> Row:
@@ -38,11 +40,6 @@ def empty_row() -> Row:
 
 
 surfaces: list[Surface] = ["sphere", "rectangle", "infinite", "torus", "?"]
-
-A_CLEAR = "\033[2J"
-A_TOP = "\033[H"
-A_RED_BOLD = "\x1b[1;31m"
-A_RESET_COLOR = "\x1b[0m"
 
 
 def ix(row: Row, x: int, default=DEAD) -> Cell:
@@ -186,24 +183,57 @@ def pick_updater(source: str, surface: Surface) -> Callable[[Board], Board]:
     return default
 
 
+A_CLEAR = "\033[2J"
+A_TOP = "\033[H"
+A_RED_BOLD = "\x1b[1;31m"
+A_RESET_COLOR = "\x1b[0m"
+COLORS = [
+    ("red", "\x1b[0;31m"),
+    ("magenta", "\x1b[0;34m"),
+    ("yellow", "\x1b[0;33m"),
+    ("green", "\x1b[0;32m"),
+    ("blue", "\x1b[0;35m"),
+    ("cyan", "\x1b[0;36m"),
+    ("white", "\x1b[0;37m"),
+]
+COLORS_DICT = dict(COLORS)
+current_color = 0
+
+
 def cli_display(board, iteration: int | float, args: OutputArgs) -> None:
+    global current_color
     alphabet = (LIVE_STR, DEAD_STR)
     if args.get("pretty"):
         alphabet = (LIVE_STR_PRETTY, DEAD_STR_PRETTY)
     if args.get("narrow"):
         alphabet = (alphabet[0][0], alphabet[1][0])
 
+    setcolor = args.get("color")
     # Display
-    if args.get("color"):
-        print(A_RED_BOLD)
-    print(show(board, alphabet))
-    if args.get("color"):
+    if setcolor and setcolor in COLORS_DICT:
+        print(COLORS_DICT.get(setcolor), end="")
+    if setcolor == "dynamic":
+        live, dead = alphabet
+        out = "\n".join(
+            "".join(
+                COLORS[(current_color // 5 + x // 3 + y // 6) % len(COLORS)][1] + live
+                if cell
+                else dead
+                for x, cell in enumerate(row)
+            )
+            for y, row in enumerate(board)
+        )
+        print(out)
+    else:
+        print(show(board, alphabet))
+    if setcolor:
         print(A_RESET_COLOR)
     if all(not cell for row in board for cell in row):
         print("empty board")
     print("Game of Life", iteration)
     print(args.get("name", ""), "source:", args.get("source", "unknown"))
 
+    current_color += 1
     if iteration > 1:
         time.sleep(args.get("delay", 1.0))
         print(A_CLEAR, end=A_TOP)
@@ -232,12 +262,13 @@ def loop(
         iteration += 1
         display(board, iteration, args)
 
+
 def make_init_board(args) -> Board:
     # Use terminal width to find size
     try:
         width = args.width or int(subprocess.check_output(["tput", "cols"]))
         height = args.height or int(subprocess.check_output(["tput", "lines"]))
-        height -= 3
+        height -= 5
         if not args.narrow:
             width //= 2
     except:  # pylint: disable=bare-except
@@ -247,7 +278,10 @@ def make_init_board(args) -> Board:
         return empty(width, height)
     if args.file:
         with open(args.file, encoding="utf-8") as boardfile:
-            return parse(boardfile.readlines())
+            init_board = parse(boardfile.readlines())
+            if args.expand_to_size:
+                return add(empty(width, height), init_board)
+            return init_board
     if args.glider_board:
         if width > height:
             width = height * (width // height)
@@ -265,11 +299,12 @@ def make_init_board(args) -> Board:
         direction = not direction
     return board
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("--iterations", "-i", type=int, default=float("inf"))
+    parser.add_argument("--iterations", "-i", type=float, default=float("inf"))
     parser.add_argument("--delay", "-d", type=float, default=0.03)
     parser.add_argument(
         "--surface",
@@ -286,21 +321,26 @@ def main() -> None:
     parser.add_argument("--name", default="")
     parser.add_argument("--pretty", "-p", action="store_true")
     parser.add_argument("--narrow", "-n", action="store_true")
-    parser.add_argument("--color", "-c", action="store_true")
     parser.add_argument(
-        "--width", "-w",
+        "--color", "-c", choices=["on", "off", "dynamic"] + list(COLORS_DICT.keys())
+    )
+    parser.add_argument(
+        "--width",
+        "-w",
         type=int,
         default=None,
         help="Minimum size of the board. "
         "The size of the terminal window may be used if this option not given.",
     )
     parser.add_argument(
-        "--height", "-l",
+        "--height",
+        "-l",
         type=int,
         default=None,
         help="Minimum size of the board. "
         "The size of the terminal window may be used if this option not given.",
     )
+    parser.add_argument("--expand-to-size", "-e", action="store_true")
     board_input = parser.add_mutually_exclusive_group(required=True)
     board_input.add_argument(
         "--file",
@@ -317,12 +357,12 @@ def main() -> None:
     init_board = make_init_board(args)
 
     output_args: OutputArgs = {
-        "name": args.name,
+        "name": os.path.basename(args.file) or ("gliders" if args.glider_board else None),
         "source": args.source,
         "delay": float(args.delay),
         "pretty": bool(args.pretty),
         "narrow": bool(args.narrow),
-        "color": (255, 0, 0) if args.color else (0, 0, 0),
+        "color": "dynamic" if args.color == "on" else args.color,
     }
     try:
         loop(
@@ -332,7 +372,7 @@ def main() -> None:
             args=output_args,
         )
     except (EOFError, KeyboardInterrupt):
-        pass
+        sys.exit(1)
 
 
 if __name__ == "__main__":
